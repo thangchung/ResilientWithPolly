@@ -9,7 +9,6 @@ using Polly.Timeout;
 using ProCodeGuide.Polly.Order.ViewModels;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
 
@@ -24,63 +23,81 @@ namespace ProCodeGuide.Polly.Order.Controllers
         private readonly ILogger<OrderController> _logger;
         private readonly IHttpClientFactory _httpClientFactory;
         private HttpClient _httpClient;
-        private string apiurl = @"http://localhost:23833/";
+        private string apiurl = @"http://localhost:5001/";
 
         private OrderDetails _orderDetails = null;
 
-        private readonly RetryPolicy _retryPolicy;
-        private static TimeoutPolicy _timeoutPolicy;
-        private readonly FallbackPolicy<string> _fallbackPolicy;
-        private static CircuitBreakerPolicy _circuitBreakerPolicy;
-        private static BulkheadPolicy _bulkheadPolicy;
+        private readonly AsyncRetryPolicy _retryPolicy;
+        private static AsyncTimeoutPolicy _timeoutPolicy;
+        private readonly AsyncFallbackPolicy<string> _fallbackPolicy;
+        private static AsyncCircuitBreakerPolicy _circuitBreakerPolicy;
+        private static AsyncBulkheadPolicy _bulkheadPolicy;
 
         public OrderController(ILogger<OrderController> logger, IHttpClientFactory httpClientFactory)
         {
             _logger = logger;
             _httpClientFactory = httpClientFactory;
 
-            if (_orderDetails == null)
+            _orderDetails = new OrderDetails
             {
-                _orderDetails = new OrderDetails
+                Id = 7261,
+                SetupDate = DateTime.Now.AddDays(-10),
+                Items = new List<Item>
                 {
-                    Id = 7261,
-                    SetupDate = DateTime.Now.AddDays(-10),
-                    Items = new List<Item>()
-                };
-                _orderDetails.Items.Add(new Item
-                {
-                    Id = 6514,
-                    Name = ".NET Core Book"
-                });
-            }
+                    new Item
+                    {
+                        Id = 6514,
+                        Name = ".NET Core Book"
+                    }
+                }
+            };
 
             _retryPolicy = Policy
                 .Handle<Exception>()
-                .Retry(2);
+                .RetryAsync(2, (_, retryCount, _) =>
+                {
+                    _logger.LogInformation($"{nameof(GetOrderByCustomerWithRetry)} - retrying - {retryCount}");
+                });
 
-            _timeoutPolicy = Policy.Timeout(20, TimeoutStrategy.Pessimistic);
+            _timeoutPolicy = Policy.TimeoutAsync(10, TimeoutStrategy.Pessimistic,
+                (_, _, _) =>
+                {
+                    _logger.LogInformation($"{nameof(GetOrderByCustomerWithTimeout)} - give up after 10 seconds");
+                    return Task.CompletedTask;
+                });
 
             _fallbackPolicy = Policy<string>
                                 .Handle<Exception>()
-                                .Fallback("Customer Name Not Available - Please retry later");
+                                .FallbackAsync("Customer Name Not Available - Please retry later");
 
-            if (_circuitBreakerPolicy == null)
+            void OnBreak(Exception exception, TimeSpan timespan, Context context)
             {
-                _circuitBreakerPolicy = Policy.Handle<Exception>()
-                                              .CircuitBreaker(2, TimeSpan.FromMinutes(1));
+                _logger.LogInformation($"{nameof(GetOrderByCustomerWithCircuitBreaker)} - on break");
             }
 
-            _bulkheadPolicy = Policy.Bulkhead(3, 6);
+            void OnReset(Context context)
+            {
+                _logger.LogInformation($"{nameof(GetOrderByCustomerWithCircuitBreaker)} - on reset");
+            }
+
+            _circuitBreakerPolicy ??= Policy.Handle<Exception>()
+                .CircuitBreakerAsync(2, TimeSpan.FromSeconds(10),OnBreak, OnReset);
+
+            _bulkheadPolicy = Policy.BulkheadAsync(3, 6, context =>
+            {
+                _logger.LogInformation($"{nameof(GetOrderByCustomerWithBulkHead)} - bulkhead");
+                return Task.CompletedTask;
+            });
         }
 
         [HttpGet]
         [Route("GetOrderByCustomer/{customerCode}")]
-        public OrderDetails GetOrderByCustomer(int customerCode)
+        public async Task<OrderDetails> GetOrderByCustomer(int customerCode)
         {
             _httpClient = _httpClientFactory.CreateClient();
             _httpClient.BaseAddress = new Uri(apiurl);
             var uri = "/api/Customer/GetCustomerName/" + customerCode;
-            var result = _httpClient.GetStringAsync(uri).Result;
+            var result = await _httpClient.GetStringAsync(uri);
 
             _orderDetails.CustomerName = result;
 
@@ -89,12 +106,12 @@ namespace ProCodeGuide.Polly.Order.Controllers
 
         [HttpGet]
         [Route("GetOrderByCustomerWithRetry/{customerCode}")]
-        public OrderDetails GetOrderByCustomerWithRetry(int customerCode)
+        public async Task<OrderDetails> GetOrderByCustomerWithRetry(int customerCode)
         {
             _httpClient = _httpClientFactory.CreateClient();
             _httpClient.BaseAddress = new Uri(apiurl);
             var uri = "/api/Customer/GetCustomerNameWithTempFailure/" + customerCode;
-            var result = _retryPolicy.Execute(() => _httpClient.GetStringAsync(uri).Result);
+            var result = await _retryPolicy.ExecuteAsync(() => _httpClient.GetStringAsync(uri));
 
             _orderDetails.CustomerName = result;
 
@@ -103,14 +120,14 @@ namespace ProCodeGuide.Polly.Order.Controllers
 
         [HttpGet]
         [Route("GetOrderByCustomerWithTimeout/{customerCode}")]
-        public OrderDetails GetOrderByCustomerWithTimeout(int customerCode)
+        public async Task<OrderDetails> GetOrderByCustomerWithTimeout(int customerCode)
         {
             try
             {
                 _httpClient = _httpClientFactory.CreateClient();
                 _httpClient.BaseAddress = new Uri(apiurl);
                 var uri = "/api/Customer/GetCustomerNameWithDelay/" + customerCode;
-                var result = _timeoutPolicy.Execute(() => _httpClient.GetStringAsync(uri).Result);
+                var result = await _timeoutPolicy.ExecuteAsync(() => _httpClient.GetStringAsync(uri));
 
                 _orderDetails.CustomerName = result;
 
@@ -118,7 +135,7 @@ namespace ProCodeGuide.Polly.Order.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Excpetion Occurred");
+                _logger.LogError(ex, "Exception Occurred");
                 _orderDetails.CustomerName = "Customer Name Not Available as of Now";
                 return _orderDetails;
             }
@@ -126,14 +143,14 @@ namespace ProCodeGuide.Polly.Order.Controllers
 
         [HttpGet]
         [Route("GetOrderByCustomerWithFallback/{customerCode}")]
-        public OrderDetails GetOrderByCustomerWithFallback(int customerCode)
+        public async Task<OrderDetails> GetOrderByCustomerWithFallback(int customerCode)
         {
             try
             {
                 _httpClient = _httpClientFactory.CreateClient();
                 _httpClient.BaseAddress = new Uri(apiurl);
                 var uri = "/api/Customer/GetCustomerNameWithPermFailure/" + customerCode;
-                var result = _fallbackPolicy.Execute(() => _httpClient.GetStringAsync(uri).Result);
+                var result = await _fallbackPolicy.ExecuteAsync(() => _httpClient.GetStringAsync(uri));
 
                 _orderDetails.CustomerName = result;
                 return _orderDetails;
@@ -148,14 +165,14 @@ namespace ProCodeGuide.Polly.Order.Controllers
 
         [HttpGet]
         [Route("GetOrderByCustomerWithCircuitBreaker/{customerCode}")]
-        public OrderDetails GetOrderByCustomerWithCircuitBreaker(int customerCode)
+        public async Task<OrderDetails> GetOrderByCustomerWithCircuitBreaker(int customerCode)
         {
             try
             {
                 _httpClient = _httpClientFactory.CreateClient();
                 _httpClient.BaseAddress = new Uri(apiurl);
                 var uri = "/api/Customer/GetCustomerNameWithPermFailure/" + customerCode;
-                var result = _circuitBreakerPolicy.Execute(() => _httpClient.GetStringAsync(uri).Result);
+                var result = await _circuitBreakerPolicy.ExecuteAsync(() => _httpClient.GetStringAsync(uri));
 
                 _orderDetails.CustomerName = result;
                 return _orderDetails;
@@ -170,12 +187,12 @@ namespace ProCodeGuide.Polly.Order.Controllers
 
         [HttpGet]
         [Route("GetOrderByCustomerWithBulkHead/{customerCode}")]
-        public OrderDetails GetOrderByCustomerWithBulkHead(int customerCode)
+        public async Task<OrderDetails> GetOrderByCustomerWithBulkHead(int customerCode)
         {
             _httpClient = _httpClientFactory.CreateClient();
             _httpClient.BaseAddress = new Uri(apiurl);
             var uri = "/api/Customer/GetCustomerName/" + customerCode;
-            var result = _bulkheadPolicy.Execute(() => _httpClient.GetStringAsync(uri).Result);
+            var result = await _bulkheadPolicy.ExecuteAsync(() => _httpClient.GetStringAsync(uri));
 
             _orderDetails.CustomerName = result;
 

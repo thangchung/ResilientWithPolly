@@ -1,0 +1,21 @@
+# tye application configuration file
+# read all about it at https://github.com/dotnet/tye
+#
+# when you've given us a try, we'd love to know what you think:
+#    https://aka.ms/AA7q20u
+#
+name: procodeguide.sample.polly
+services:
+- name: procodeguide-polly-customer
+  project: ProCodeGuide.Polly.Customer/ProCodeGuide.Polly.Customer.csproj
+  bindings:
+  - protocol: http
+    containerPort: 5001
+    port: 5001
+
+- name: procodeguide-polly-order
+  project: ProCodeGuide.Polly.Order/ProCodeGuide.Polly.Order.csproj
+  bindings:
+  - protocol: http
+    containerPort: 5002
+    port: 5002

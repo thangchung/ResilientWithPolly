@@ -14,18 +14,17 @@ namespace ProCodeGuide.Polly.Customer.Controllers
     [ApiController]
     public class CustomerController : ControllerBase
     {
-        private Dictionary<int, string> _customerNameDict = null;
+        private readonly Dictionary<int, string> _customerNameDict;
 
         public CustomerController()
         {
-            if (_customerNameDict == null)
+            _customerNameDict = new Dictionary<int, string>
             {
-                _customerNameDict = new Dictionary<int, string>();
-                _customerNameDict.Add(1, "Pro Code Guide");
-                _customerNameDict.Add(2, "Support - Pro Code Guide");
-                _customerNameDict.Add(3, "Sanjay");
-                _customerNameDict.Add(4, "Sanjay - Pro Code Guide");
-            }
+                {1, "Pro Code Guide"},
+                {2, "Support - Pro Code Guide"},
+                {3, "Sanjay"},
+                {4, "Sanjay - Pro Code Guide"}
+            };
         }
 
         [HttpGet]
@@ -45,8 +44,8 @@ namespace ProCodeGuide.Polly.Customer.Controllers
         {
             try
             {
-                Random rnd = new Random();
-                int randomError = rnd.Next(1, 11);  // creates a number between 1 and 10
+                var rnd = new Random();
+                var randomError = rnd.Next(1, 11);  // creates a number between 1 and 10
 
                 if (randomError % 2 == 0)
                     throw new Exception();
