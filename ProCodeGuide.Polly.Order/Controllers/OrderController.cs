@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Configuration;
 using Polly;
 using Polly.Bulkhead;
 using Polly.CircuitBreaker;
@@ -33,10 +34,12 @@ namespace ProCodeGuide.Polly.Order.Controllers
         private static AsyncCircuitBreakerPolicy _circuitBreakerPolicy;
         private static AsyncBulkheadPolicy _bulkheadPolicy;
 
-        public OrderController(ILogger<OrderController> logger, IHttpClientFactory httpClientFactory)
+        public OrderController(ILogger<OrderController> logger, IHttpClientFactory httpClientFactory, IConfiguration config)
         {
             _logger = logger;
             _httpClientFactory = httpClientFactory;
+
+            apiurl = config.GetValue("CustomerUrl",  @"http://localhost:5001/");
 
             _orderDetails = new OrderDetails
             {
